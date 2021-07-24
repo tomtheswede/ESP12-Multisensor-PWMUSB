@@ -347,21 +347,23 @@ void publishSensorStates() {
   float t = sht31.readTemperature();
   float h = sht31.readHumidity();
 
-  //Send the sensor readings
-  StaticJsonDocument<200> json;
-  json["temperature"] = t;
-  json["humidity"] = h;
-  //Send state update back to base
-  char tempStateTopic[200] = ""; //Reset the variable before concatinating
-  strcat(tempStateTopic,"homeassistant/sensor/");
-  strcat(tempStateTopic,devName);
-  char data[200];
-  serializeJson(json, data);
-  client.publish(tempStateTopic, data, true);
-  Serial.print("Sent state: ");
-  Serial.print(data);
-  Serial.print(" to ");
-  Serial.println(tempStateTopic);
+  if (((lastT-t<-0.2) || (lastT-t>0.2) || (lastH-h>3) || (lastH-h<-3)) && (lastSensorSend+5000<millis())) {
+    //Send the sensor readings
+    StaticJsonDocument<200> json;
+    lastT=t;
+    lastH=h;
+    lastSensorSend=millis();
+    json["temperature"] = t;
+    json["humidity"] = h;
+    //Send state update back to base
+    char tempStateTopic[200] = ""; //Reset the variable before concatinating
+    strcat(tempStateTopic,"homeassistant/sensor/");
+    strcat(tempStateTopic,devName);
+    char data[200];
+    serializeJson(json, data);
+    client.publish(tempStateTopic, data, true);
+  }
+  
 }
 
 void fadeLEDs() {

@@ -13,15 +13,15 @@
 #include <ArduinoJson.h>
 
 // Replace the next variables with your SSID/Password combination
-char* wifi_ssid = "NOKIA-4023435DF995";
-char* wifi_password = "5985619313";
+char* wifi_ssid = "ENTER SSID HERE";
+char* wifi_password = "ENTER PASSWORD HERE";
 
 // Add your MQTT Broker IP address, example:
 const char* mqtt_server = "192.168.1.117";
 const int mqtt_port = 1883;
 const char* mqtt_clientname = "espclient4";
 const char* mqtt_username = "user";
-const char* mqtt_password = "passwd";
+const char* mqtt_password = "ENTER MQTT PASSWORD HERE";
 const char topicPrefix[] = "homeassistant/";
 char ledRootTopic[200] = "";
 

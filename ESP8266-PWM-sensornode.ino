@@ -3,7 +3,7 @@
  *   For a LED lamp with an ESP8266 chip.
  *   Most code by Thomas Friberg
  *   Leverages code from https://github.com/mertenats/Open-Home-Automation/blob/master/ha_mqtt_rgbw_light_with_discovery/ha_mqtt_rgbw_light_with_discovery.ino
- *   Updated 24/07/2021
+ *   Updated 25/07/2021
  *   
  */ 
 
@@ -17,21 +17,21 @@
 #include "Adafruit_SHT31.h"
 
 // Replace the next variables with your SSID/Password combination
-char* wifi_ssid = "ENTER SSID HERE";
-char* wifi_password = "ENTER WIFI PASSWORD HERE";
+char* wifi_ssid = "INSERT SSID HERE";
+char* wifi_password = "INSERT WIFI PASSWORD HERE";
 
 // Add your MQTT Broker IP address, example:
 const char* mqtt_server = "192.168.1.117";
 const int mqtt_port = 1883;
-const char* mqtt_clientname = "espclient7"; //Not sure but I think this needs to be unique for each device
+const char* mqtt_clientname = "espclient14"; //Must change for each new device!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 const char* mqtt_username = "user";
-const char* mqtt_password = "ENTER MQTT PASSWORD HERE";
+const char* mqtt_password = "INSERT MQTT BROKER PASSWORD HERE";
 const char topicPrefix[] = "homeassistant/";
 char ledRootTopic[200] = "";
 char sensorRootTopic[200] = "";
 
 // Device preferences
-const char devName[] = "bedSen7"; //machine device name. Set human readable names in discovery
+const char devName[] = "bedSense"; //machine device name. Set human readable names in discovery. Make unique for each device!!!!!!!!!!!!!!!!!!!!!!
 const char devLocation[] = "bedroom"; //Not currently used
 //LED
 const int ledPin = 2;
@@ -39,9 +39,12 @@ const int ledPin = 2;
 //const int pwmFreq = 5000; //ESP32 specific
 //const int pwmResolution = 10; //ESP32 specific
 const int defaultFade = 20; //Milliseconds between fade intervals
+int currentFade = defaultFade; //Milliseconds between fade intervals
 static const unsigned int PWMTable[101] = {0,1,2,3,5,6,7,8,9,10,12,13,14,16,18,20,21,24,26,28,31,33,36,39,42,45,49,52,56,60,64,68,72,77,82,87,92,98,103,109,115,121,128,135,142,149,156,164,172,180,188,197,206,215,225,235,245,255,266,276,288,299,311,323,336,348,361,375,388,402,417,432,447,462,478,494,510,527,544,562,580,598,617,636,655,675,696,716,737,759,781,803,826,849,872,896,921,946,971,997,1023}; //0 to 100 values for brightnes
 //Button
 const int buttonPin = 0;
+//ADC light sensor
+const int luminosityPin = A0;
 
 // Initialise instances
 WiFiClient espClient;
@@ -64,6 +67,11 @@ bool primer[4]={0,0,0,0};
 
 //Initialise global sensors
 Adafruit_SHT31 sht31 = Adafruit_SHT31();
+float lastT = 0.0;
+float lastH = 0.0;
+unsigned long lastSensorSend = millis();
+char sensorPubTopic[200];
+int lastL = 0;
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////
 // SETUP
@@ -125,9 +133,18 @@ void reconnect() {
     if (client.connect(mqtt_clientname, mqtt_username, mqtt_password)) {
       Serial.println("connected");
       // Discovery and subscription
-      publishLightDiscovery("light", "light", devName, "led", "Bedroom Lights6");
+      publishLightDiscovery("light", "light", devName, "led", "Fairy lights"); //MANUAL UPDATE TO NAME HERE --------------------------
       //publishButtonDiscovery("switch", "light", devName, "led", "Bedroom Lights");
-      publishSensorDiscovery("sensor", "sensor", devName, "temp", "Bedroom Temperature");
+      //set sensor pub topic
+      char tempTopicBuilder2[200] = ""; //Reset the variable before concatinating
+      strcat(tempTopicBuilder2,topicPrefix);
+      strcat(tempTopicBuilder2,"sensor/");
+      strcat(tempTopicBuilder2,devName);
+      strcat(sensorPubTopic, tempTopicBuilder2); //sets the sensor publishing topic to global memory
+      publishSensorDiscovery("temperature", devName, "temp", "Bedroom Temperature", "°C", "{{ value_json.temperature }}");
+      publishSensorDiscovery("humidity", devName, "hum", "Bedroom Humidity", "%", "{{ value_json.humidity }}");
+      publishSensorDiscovery("illuminance", devName, "lum", "Bedroom Illuminance", "lx", "{{ value_json.illuminance }}");
+      Serial.println("Sensors publishing to this topic: " + String(sensorPubTopic));
       
     } else {
       Serial.print("failed, rc=");
@@ -196,7 +213,7 @@ void publishLightDiscovery(const char *component, const char *device_class, cons
 
 }
 
-void publishSensorDiscovery(const char *component, const char *device_class, const char *device_id, const char *entity_id, const char *name_suffix) {
+void publishSensorDiscovery(const char *device_class, const char *device_id, const char *entity_id, const char *name_suffix, const char *uom, const char *jsonTemplate) {
   //component says what sort of discovery fields to include as well as setting MQTT path prefix, device_class sets icon default, config_Key defines the MQTT path and uniqueID and must be unique, name_suffix is the human description of the entity excluding location
 
   DynamicJsonDocument json(1024);
@@ -207,18 +224,10 @@ void publishSensorDiscovery(const char *component, const char *device_class, con
   strcat(tempTopicBuilder1,"_");
   strcat(tempTopicBuilder1,entity_id);
   json["uniq_id"] = tempTopicBuilder1;
-  char tempTopicBuilder2[200] = ""; //Reset the variable before concatinating
-  strcat(tempTopicBuilder2,topicPrefix);
-  strcat(tempTopicBuilder2,component);
-  strcat(tempTopicBuilder2,"/");
-  strcat(tempTopicBuilder2,device_id);
-  json["~"] = tempTopicBuilder2;  //eg. "homeassistant/light/kitchen/espLamp/led";
-  char tempTopicBuilder4[200] = ""; //Reset the variable before concatinating
-  strcat(tempTopicBuilder4,"~");
-  json["stat_t"] = tempTopicBuilder4;  //"homeassistant/light/kitchen/espLamp/led/state";
-  json["device_class"] = "temperature";
-  json["unit_of_meas"] = "°C";
-  json["val_tpl"] = "{{ value_json.temperature }}";
+  json["stat_t"] = sensorPubTopic;  //"homeassistant/light/kitchen/espLamp/led/state";
+  json["device_class"] = device_class;
+  json["unit_of_meas"] = uom;
+  json["val_tpl"] = jsonTemplate;
   //json["schema"] = "json"; 
 
   //prep for send
@@ -226,7 +235,7 @@ void publishSensorDiscovery(const char *component, const char *device_class, con
   serializeJson(json, data);
   //size_t n = serializeJson(json, data);
   char tempTopicBuilder3[200] = ""; //Reset the variable before concatinating
-  strcat(tempTopicBuilder3,tempTopicBuilder2);
+  strcat(tempTopicBuilder3,sensorPubTopic);
   strcat(tempTopicBuilder3,"/");
   strcat(tempTopicBuilder3,entity_id);
   strcat(tempTopicBuilder3,"/config");
@@ -254,7 +263,7 @@ void loop() {
   buttonCheck();
 
   publishSensorStates();
-  delay(5000);
+  //delay(5000);
   
 }
 
@@ -287,9 +296,19 @@ void parseMessage(String messageIn) { //Based on https://arduinojson.org/v6/exam
   
   const char* stateMessage = doc["state"];
   int brightnessIn = doc["brightness"];
+  float transitionTimeIn = doc["transition"];
   //Serial.println(stateMessage);
   //Serial.println(brightnessIn);
+  //Serial.println(transitionTimeIn);
   String stateString(stateMessage);
+
+  if(transitionTimeIn>0) {
+    currentFade = (int) (transitionTimeIn * 10);
+    //Serial.println("Transition interval now set to " + String(currentFade) + "ms");
+  }
+  else {
+    currentFade = defaultFade;
+  }
 
   // Feel free to add more if statements to control more GPIOs with MQTT
 
@@ -342,39 +361,40 @@ void publishLedState(String ledState, int ledBrightness) {
 }
 
 void publishSensorStates() {
-
-  //SHT31 sensor
-  float t = sht31.readTemperature();
-  float h = sht31.readHumidity();
-
-  if (((lastT-t<-0.2) || (lastT-t>0.2) || (lastH-h>3) || (lastH-h<-3)) && (lastSensorSend+5000<millis())) {
-    //Send the sensor readings
-    StaticJsonDocument<200> json;
-    lastT=t;
-    lastH=h;
+  if (lastSensorSend+5000<millis()) { //Without this pause for sensor checking, LED dimming is much slower
+    //SHT31 sensor
+    float t = sht31.readTemperature()-5; //-4degC calibration to account for heat generated on the board
+    float h = sht31.readHumidity();
+    //Luminosity sensor
+    float l = analogRead(luminosityPin)*4.0;
     lastSensorSend=millis();
-    json["temperature"] = t;
-    json["humidity"] = h;
-    //Send state update back to base
-    char tempStateTopic[200] = ""; //Reset the variable before concatinating
-    strcat(tempStateTopic,"homeassistant/sensor/");
-    strcat(tempStateTopic,devName);
-    char data[200];
-    serializeJson(json, data);
-    client.publish(tempStateTopic, data, true);
+    
+    if (((lastT-t<-0.2) || (lastT-t>0.2) || (lastH-h>1) || (lastH-h<-1) || (lastL-l>50) || (lastL-l<-50))) {
+      //Send the sensor readings
+      lastT=round(t * 10.0)/10.0;
+      lastH=round(h * 10.0)/10.0;
+      lastL=(int) l;
+      
+      StaticJsonDocument<128> json;
+      json["temperature"] = lastT;
+      json["humidity"] = lastH;
+      json["illuminance"] = lastL;
+      char data[64];
+      serializeJson(json, data);
+      client.publish(sensorPubTopic, data, true);
+    }
   }
-  
 }
 
 void fadeLEDs() {
-  if ((millis() % defaultFade == 0) && (ledPinState < ledSetPoint)) {
+  if ((millis() % currentFade == 0) && (ledPinState < ledSetPoint)) {
     ledPinState = ledPinState + 1;
     analogWrite(ledPin,PWMTable[ledPinState]);
     //ledcWrite(ledChannel, PWMTable[ledPinState]); //AnalogOut is the alternative for ESP8266 devices
     //Serial.println("LED state is now set to " + String(ledPinState));
     delay(1); //Consider less wasteful timer
   }
-  else if ((millis() % defaultFade == 0) && (ledPinState > ledSetPoint)) {
+  else if ((millis() % currentFade == 0) && (ledPinState > ledSetPoint)) {
     ledPinState = ledPinState - 1;
     analogWrite(ledPin,PWMTable[ledPinState]);
     //ledcWrite(ledChannel, PWMTable[ledPinState]);
@@ -392,6 +412,7 @@ void buttonCheck() {
   if (buttonState!=lastButtonState && currentTime>buttonTriggerTime+30) {
     if (buttonState && currentTime>buttonTriggerTime+200) {
       Serial.print("Short press ");
+      currentFade = defaultFade; //Reset fade duration to default if previously set differently.
       defaultToggleBehaviour();
       buttonTriggerTime=currentTime;
       primer[0]=1;
